@@ -14,7 +14,12 @@ export default defineConfig({
   forbidOnly: config.isCI,
   retries: config.isCI ? 1 : 0,
   workers: config.workers ?? 2,
-  reporter: [['list']],
+  reporter: [
+    ['list'],
+    ['html', { outputFolder: 'reports/html', open: 'never' }],
+    ['json', { outputFile: 'reports/results.json' }],
+    ['junit', { outputFile: 'reports/junit.xml' }],
+  ],
   use: {
     actionTimeout: config.timeouts.action,
     navigationTimeout: config.timeouts.navigation,
@@ -36,6 +41,13 @@ export default defineConfig({
       testIgnore: /session\.setup\.ts/,
       dependencies: ['setup'],
       use: { ...devices['Desktop Chrome'], storageState: config.storageStatePath },
+    },
+    {
+      name: 'webkit',
+      testIgnore: /session\.setup\.ts/,
+      grep: /@smoke/,
+      dependencies: ['setup'],
+      use: { ...devices['Desktop Safari'], storageState: config.storageStatePath },
     },
   ],
 });

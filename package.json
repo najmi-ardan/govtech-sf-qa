@@ -5,11 +5,18 @@
   "description": "Playwright and TypeScript tests for Salesforce Lightning.",
   "scripts": {
     "test": "playwright test",
+    "test:smoke": "playwright test --grep @smoke",
+    "test:chromium": "playwright test --project=chromium",
+    "test:webkit": "playwright test --project=webkit",
+    "test:headed": "playwright test --project=chromium --headed",
+    "test:list": "playwright test --list",
     "session:check": "playwright test --project=setup",
     "cleanup:test-data": "tsx scripts/cleanup-test-data.ts",
+    "report": "playwright show-report reports/html",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings 0",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "check": "npm run typecheck && npm run lint"
   },
   "engines": {
     "node": ">=20.19"
