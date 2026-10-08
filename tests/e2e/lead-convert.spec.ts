@@ -1,7 +1,9 @@
 import { test, expect } from '../fixtures';
+import { assertLeadConvertResponse } from '../../api/leadConvertResponse';
 import type { SalesforceApi } from '../../api/SalesforceApi';
 import { DEFAULT_OPPORTUNITY_STAGE } from '../../data/picklists';
 import { seedExistingAccountAndContact, type SeededCustomer } from '../../data/seed';
+import { redact } from '../../utils/logger';
 import { isValid18CharId, KEY_PREFIX } from '../../utils/salesforceId';
 
 /**
@@ -137,12 +139,45 @@ for (const sc of scenarios) {
           const roles = await sfApi.query<{ ContactId: string; IsPrimary: boolean }>(
             `SELECT ContactId, IsPrimary FROM OpportunityContactRole WHERE OpportunityId = '${opportunityId}'`,
           );
-          expect(roles.map((r) => ({ ContactId: r.ContactId, IsPrimary: r.IsPrimary }))).toContainEqual({
-            ContactId: converted.ConvertedContactId,
-            IsPrimary: true,
-          });
+        expect(roles.map((r) => ({ ContactId: r.ContactId, IsPrimary: r.IsPrimary }))).toContainEqual({
+          ContactId: converted.ConvertedContactId,
+          IsPrimary: true,
         });
-      }
-    },
-  );
+      });
+    }
+
+    await test.step('The convert response contains the linked record ids', async () => {
+      const sanitized = result.network.map((c) =>
+        redact({
+          url: c.url.split('?')[0],
+          status: c.status,
+          requestActions: c.requestActions,
+          responseActions: c.responseActions,
+        }),
+      );
+      await test.info().attach('lead-convert-network.json', {
+        body: JSON.stringify(sanitized, null, 2),
+        contentType: 'application/json',
+      });
+      const evidence = assertLeadConvertResponse(
+        result.network,
+        {
+          leadId,
+          opportunityId,
+          accountId: converted?.ConvertedAccountId ?? seeded?.accountId ?? result.accountId ?? '',
+          contactId: converted?.ConvertedContactId ?? seeded?.contactId ?? result.contactId ?? '',
+          convertedStatus: result.convertedStatus,
+          opportunityName: result.opportunityName,
+        },
+        result.observedAura,
+      );
+      log.info('convert response', {
+        state: evidence.state,
+        accountId: evidence.returnValue.accountId,
+        contactId: evidence.returnValue.contactId,
+        opportunityId: evidence.returnValue.opportunityId,
+      });
+    });
+  },
+);
 }
