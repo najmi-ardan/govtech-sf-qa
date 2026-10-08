@@ -1,5 +1,6 @@
 import { expect, type Locator } from '@playwright/test';
 import { recordUrlRegex } from '../utils/salesforceId';
+import { LeadConvertModal } from './LeadConvertModal';
 import { LeadFormModal } from './LeadFormModal';
 import { RecordPage } from './RecordPage';
 
@@ -41,5 +42,12 @@ export class LeadRecordPage extends RecordPage {
     const form = new LeadFormModal(this.page, this.log, /^Edit /);
     await form.expectOpen();
     return form;
+  }
+
+  async convert(): Promise<LeadConvertModal> {
+    await this.clickAction('Convert');
+    const convert = new LeadConvertModal(this.page, this.log);
+    await convert.expectOpen();
+    return convert;
   }
 }

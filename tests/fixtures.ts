@@ -4,6 +4,7 @@ import { config } from '../config/env';
 import { buildLead, type LeadData } from '../data/leadFactory';
 import { LeadRecordPage } from '../pages/LeadRecordPage';
 import { LeadsPage } from '../pages/LeadsPage';
+import { OpportunityRecordPage } from '../pages/OpportunityRecordPage';
 import { SalesAppPage } from '../pages/SalesAppPage';
 import { logger as rootLogger, type Logger } from '../utils/logger';
 
@@ -13,6 +14,7 @@ type TestFixtures = {
   salesApp: SalesAppPage;
   leadsPage: LeadsPage;
   leadRecord: LeadRecordPage;
+  opportunityPage: OpportunityRecordPage;
   trackRecord: (sobject: string, id: string) => void;
   failureContext: void;
 };
@@ -69,6 +71,7 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
   salesApp: async ({ page, log }, use) => use(new SalesAppPage(page, log)),
   leadsPage: async ({ page, log }, use) => use(new LeadsPage(page, log)),
   leadRecord: async ({ page, log }, use) => use(new LeadRecordPage(page, log)),
+  opportunityPage: async ({ page, log }, use) => use(new OpportunityRecordPage(page, log)),
 
   failureContext: [
     async ({ page, log }, use, testInfo) => {
