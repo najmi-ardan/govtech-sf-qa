@@ -6,6 +6,7 @@
   "scripts": {
     "test": "playwright test",
     "session:check": "playwright test --project=setup",
+    "cleanup:test-data": "tsx scripts/cleanup-test-data.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix"
