@@ -5,6 +5,7 @@
   "description": "Playwright and TypeScript tests for Salesforce Lightning.",
   "scripts": {
     "test": "playwright test",
+    "session:check": "playwright test --project=setup",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix"

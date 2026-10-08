@@ -27,8 +27,15 @@ export default defineConfig({
   },
   projects: [
     {
+      name: 'setup',
+      testMatch: /session\.setup\.ts/,
+      use: { ...devices['Desktop Chrome'], trace: 'off', video: 'off' },
+    },
+    {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      testIgnore: /session\.setup\.ts/,
+      dependencies: ['setup'],
+      use: { ...devices['Desktop Chrome'], storageState: config.storageStatePath },
     },
   ],
 });
