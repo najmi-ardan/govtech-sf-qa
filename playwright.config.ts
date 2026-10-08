@@ -1,15 +1,24 @@
 import { defineConfig, devices } from '@playwright/test';
+import { config } from './config/env';
+import { RUN_ID } from './utils/logger';
+
+// Set in the main process so workers share one run id. Lead data then differs by worker index.
+process.env.RUN_ID = RUN_ID;
 
 export default defineConfig({
   testDir: './tests',
   outputDir: './test-results',
+  timeout: config.timeouts.test,
+  expect: { timeout: config.timeouts.expect },
   fullyParallel: true,
-  forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
-  workers: 2,
+  forbidOnly: config.isCI,
+  retries: config.isCI ? 1 : 0,
+  workers: config.workers ?? 2,
   reporter: [['list']],
   use: {
-    trace: process.env.CI ? 'off' : 'retain-on-failure',
+    actionTimeout: config.timeouts.action,
+    navigationTimeout: config.timeouts.navigation,
+    trace: config.isCI ? 'off' : 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
     locale: 'en-US',
