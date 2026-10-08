@@ -1,0 +1,85 @@
+name: ci
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Lint and types
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npx playwright test --list
+
+  e2e:
+    name: Salesforce UI
+    needs: verify
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CI: 'true'
+      SF_STORAGE_STATE_B64: ${{ secrets.SF_STORAGE_STATE_B64 }}
+      STORAGE_STATE_PATH: storage/storageState.json
+      SF_BASE_URL: ${{ secrets.SF_BASE_URL }}
+    steps:
+      - name: Skip when the session secret is absent
+        id: session
+        run: |
+          if [ -z "$SF_STORAGE_STATE_B64" ]; then
+            echo "::notice::SF_STORAGE_STATE_B64 is not set. Skipping the live Salesforce tests."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.session.outputs.present == 'true'
+        uses: actions/checkout@v4
+      - if: steps.session.outputs.present == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - if: steps.session.outputs.present == 'true'
+        run: npm ci
+      - if: steps.session.outputs.present == 'true'
+        run: npx playwright install --with-deps chromium webkit
+      - name: Restore the session file
+        if: steps.session.outputs.present == 'true'
+        run: |
+          umask 077
+          mkdir -p "$(dirname "$STORAGE_STATE_PATH")"
+          if ! printf '%s' "$SF_STORAGE_STATE_B64" | base64 --decode > "$STORAGE_STATE_PATH"; then
+            echo "::error::SF_STORAGE_STATE_B64 is not valid base64."
+            exit 1
+          fi
+          node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))' "$STORAGE_STATE_PATH" \
+            || { echo "::error::SF_STORAGE_STATE_B64 does not decode to JSON."; exit 1; }
+      - if: steps.session.outputs.present == 'true'
+        run: npx playwright test --project=chromium --project=webkit
+      - name: Remove the session file
+        if: always() && steps.session.outputs.present == 'true'
+        run: rm -f "$STORAGE_STATE_PATH"
+      - if: always() && steps.session.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          if-no-files-found: ignore
+          path: |
+            reports/
+            test-results/
+            logs/
+          retention-days: 14
