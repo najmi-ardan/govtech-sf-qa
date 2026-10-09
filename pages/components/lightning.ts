@@ -55,7 +55,22 @@ export function combobox(scope: Scope, label: string): Locator {
     .first();
 }
 
+/**
+ * "Similar Records Exist" and "We hit a snag." sit above the form and take the click.
+ * The close control is named "Close error dialog". Closing it leaves the record form open.
+ */
+export async function dismissErrorDialog(page: Page, timeout = 10_000): Promise<boolean> {
+  const close = page.getByRole('button', { name: 'Close error dialog', exact: true }).filter({ visible: true });
+  if ((await close.count()) === 0) return false;
+  await expect(async () => {
+    if ((await close.count()) > 0) await close.last().click({ timeout: 2_000 });
+    await expect(close).toHaveCount(0, { timeout: 1_000 });
+  }).toPass({ timeout });
+  return true;
+}
+
 export async function fillText(scope: Scope, label: string, value: string): Promise<void> {
+  await dismissErrorDialog(rootPage(scope));
   const field = textField(scope, label);
   await field.fill(value);
   await expect(field).toHaveValue(value);
@@ -65,7 +80,12 @@ export async function fillText(scope: Scope, label: string, value: string): Prom
 async function listboxFor(trigger: Locator): Promise<Locator> {
   const page = trigger.page();
   const id = await trigger.getAttribute('aria-controls');
-  return id ? page.locator(`[id="${id}"]`) : page.getByRole('listbox').filter({ visible: true }).last();
+  const owned = id ? page.locator(`[id="${id}"]`) : undefined;
+  // WebKit sometimes leaves the aria-controls node empty and paints the open list elsewhere.
+  if (owned && (await owned.getByRole('option').count()) > 0) return owned;
+  const visible = page.getByRole('listbox').filter({ visible: true }).last();
+  if ((await visible.count()) > 0) return visible;
+  return owned ?? visible;
 }
 
 /**
@@ -75,13 +95,39 @@ async function listboxFor(trigger: Locator): Promise<Locator> {
 export async function selectOption(scope: Scope, label: string, value: string, fallbacks: string[] = []): Promise<string> {
   const page = rootPage(scope);
   const trigger = combobox(scope, label);
-  const maxAttempts = 2;
+  const maxAttempts = 3;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    await trigger.click();
-    await expect(trigger).toHaveAttribute('aria-expanded', 'true');
-    const listbox = await listboxFor(trigger);
-    await expect(listbox.getByRole('option').first()).toBeVisible();
+    // A duplicate prompt can open while the previous field blurs and swallow the click.
+    await dismissErrorDialog(page);
+    try {
+      await trigger.click({ timeout: 5_000 });
+    } catch (err) {
+      if (attempt === maxAttempts || !(await dismissErrorDialog(page))) throw err;
+      continue;
+    }
+    const opened = await expect(trigger).toHaveAttribute('aria-expanded', 'true', { timeout: 3_000 }).then(
+      () => true,
+      () => false,
+    );
+    const listbox = opened ? await listboxFor(trigger) : undefined;
+    const optionVisible =
+      listbox !== undefined &&
+      (await listbox
+        .getByRole('option')
+        .first()
+        .waitFor({ state: 'visible', timeout: 2_500 })
+        .then(
+          () => true,
+          () => false,
+        ));
+    if (!listbox || !optionVisible) {
+      if ((await trigger.getAttribute('aria-expanded')) === 'true') {
+        await trigger.click({ timeout: 2_000 }).catch(() => undefined);
+      }
+      if (attempt === maxAttempts) throw new Error(`Picklist "${label}" did not show its options`);
+      continue;
+    }
 
     let chosen: string | undefined;
     for (const candidate of [value, ...fallbacks]) {

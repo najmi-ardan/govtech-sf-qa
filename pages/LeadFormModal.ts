@@ -1,5 +1,5 @@
 import { expect, type Locator, type Page } from '@playwright/test';
-import { fillText, fillTextOrSelect, modal, selectOption, textField, waitForSpinners } from './components/lightning';
+import { dismissErrorDialog, fillText, fillTextOrSelect, modal, selectOption, textField, waitForSpinners } from './components/lightning';
 import { INDUSTRIES, LEAD_SOURCES, LEAD_STATUS, RATINGS, SALUTATIONS } from '../data/picklists';
 import type { LeadData } from '../data/leadFactory';
 import type { Logger } from '../utils/logger';
@@ -48,11 +48,7 @@ export class LeadFormModal {
    * Click the last visible close button until none remain.
    */
   async dismissPopovers(): Promise<void> {
-    const close = this.page.getByRole('button', { name: 'Close error dialog', exact: true }).filter({ visible: true });
-    await expect(async () => {
-      if ((await close.count()) > 0) await close.last().click({ timeout: 2_000 });
-      await expect(close).toHaveCount(0, { timeout: 1_000 });
-    }).toPass({ timeout: 20_000 });
+    await dismissErrorDialog(this.page, 20_000);
     await expect(this.dialog).toBeVisible();
   }
 
@@ -110,12 +106,15 @@ export class LeadFormModal {
   }
 
   async save(): Promise<void> {
+    await this.dismissPopovers();
     await this.saveButton.click();
     await expect(this.dialog).toBeHidden({ timeout: 30_000 });
     await waitForSpinners(this.page);
   }
 
   async saveExpectingOutcome(): Promise<'saved' | 'duplicate' | 'error'> {
+    // A prompt left open by a field blur covers Save. Close it, then let this save raise its own.
+    await this.dismissPopovers();
     await this.saveButton.click();
     let outcome: 'saved' | 'duplicate' | 'error' | 'pending' = 'pending';
     await expect
