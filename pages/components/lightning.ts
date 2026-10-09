@@ -56,15 +56,51 @@ export function combobox(scope: Scope, label: string): Locator {
 }
 
 /**
- * "Similar Records Exist" and "We hit a snag." sit above the form and take the click.
- * The close control is named "Close error dialog". Closing it leaves the record form open.
+ * A duplicate alert or save error sits above the form and takes the click.
+ * "We hit a snag." uses "Close error dialog". "Similar Records Exist" is a popover
+ * whose close control is "Close", and the footer warning stays expanded over the picklist.
+ * Closing either leaves the record form open.
  */
+function duplicatePrompt(page: Page): Locator {
+  // Match the prompt itself. A hasText search on every dialog also matches the New Lead
+  // dialog that contains the prompt, and that dialog stays visible after the prompt closes.
+  const named = page.getByRole('dialog', { name: /Similar Records Exist/ }).filter({ visible: true });
+  const popover = page
+    .locator('.slds-popover, lightning-popup')
+    .filter({ hasText: /Similar Records Exist|View Duplicates/ })
+    .filter({ visible: true });
+  return named.or(popover);
+}
+
 export async function dismissErrorDialog(page: Page, timeout = 10_000): Promise<boolean> {
-  const close = page.getByRole('button', { name: 'Close error dialog', exact: true }).filter({ visible: true });
-  if ((await close.count()) === 0) return false;
+  const closeError = page.getByRole('button', { name: 'Close error dialog', exact: true }).filter({ visible: true });
+  const prompt = duplicatePrompt(page);
+  const promptClose = prompt
+    .getByRole('button', { name: /^close( dialog)?$/i })
+    .or(prompt.locator('button.slds-popover__close, button[title="Close"], button[title="Close dialog"]'));
+  const errorToggle = page.getByRole('button', { name: 'Error', exact: true }).filter({ visible: true });
+
+  const open = async (): Promise<'error-dialog' | 'similar' | 'error-toggle' | null> => {
+    if ((await closeError.count()) > 0) return 'error-dialog';
+    if ((await prompt.count()) > 0) return 'similar';
+    if ((await errorToggle.count()) > 0) {
+      const expanded = await errorToggle.last().getAttribute('aria-expanded', { timeout: 1_000 }).catch(() => null);
+      if (expanded === 'true') return 'error-toggle';
+    }
+    return null;
+  };
+
+  if (!(await open())) return false;
+
   await expect(async () => {
-    if ((await close.count()) > 0) await close.last().click({ timeout: 2_000 });
-    await expect(close).toHaveCount(0, { timeout: 1_000 });
+    const which = await open();
+    if (which === 'error-dialog') await closeError.last().click({ timeout: 2_000 });
+    else if (which === 'similar') {
+      if ((await promptClose.count()) > 0) await promptClose.last().click({ timeout: 2_000 });
+      else if ((await errorToggle.count()) > 0) await errorToggle.last().click({ timeout: 2_000 });
+      else throw new Error('Similar Records Exist has no close control');
+    } else if (which === 'error-toggle') await errorToggle.last().click({ timeout: 2_000 });
+    if (await open()) throw new Error('prompt still open');
   }).toPass({ timeout });
   return true;
 }
@@ -79,7 +115,7 @@ export async function fillText(scope: Scope, label: string, value: string): Prom
 /** The listbox for an open combobox, found through aria-controls so hidden comboboxes are not used. */
 async function listboxFor(trigger: Locator): Promise<Locator> {
   const page = trigger.page();
-  const id = await trigger.getAttribute('aria-controls');
+  const id = await trigger.getAttribute('aria-controls', { timeout: 2_000 }).catch(() => null);
   const owned = id ? page.locator(`[id="${id}"]`) : undefined;
   // WebKit sometimes leaves the aria-controls node empty and paints the open list elsewhere.
   if (owned && (await owned.getByRole('option').count()) > 0) return owned;
@@ -88,68 +124,206 @@ async function listboxFor(trigger: Locator): Promise<Locator> {
   return owned ?? visible;
 }
 
+type PicklistOption = { value: string; label: string };
+
+/**
+ * data-value is the stored code (US). The name the form shows (United States) is in the shadow root.
+ * innerText on the host is blank, so both are read here.
+ */
+async function readOptions(listbox: Locator): Promise<PicklistOption[]> {
+  try {
+    const options = listbox.locator('[role="option"]');
+    if ((await options.count()) === 0) return [];
+    const rows = await options.evaluateAll((els) =>
+      els.map((el) => {
+        const host = el as HTMLElement;
+        const value = host.getAttribute('data-value')?.trim() ?? '';
+        const aria = host.getAttribute('aria-label')?.trim() ?? '';
+        const truncate = host.shadowRoot?.querySelector('.slds-truncate')?.textContent ?? '';
+        const text = (truncate || host.shadowRoot?.textContent || host.textContent || '').replace(/\s+/g, ' ').trim();
+        return { value, label: aria || text || value };
+      }),
+    );
+    const seen = new Set<string>();
+    const out: PicklistOption[] = [];
+    for (const row of rows) {
+      const label = row.label.trim();
+      if (!label) continue;
+      const key = `${row.value}|${label}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ value: row.value, label });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+function describeOptions(options: PicklistOption[]): string {
+  return options
+    .map((option) => (option.value && option.value !== option.label ? `${option.label} (${option.value})` : option.label))
+    .join(', ');
+}
+
+function labelMatches(label: string, candidate: string): boolean {
+  const lines = label
+    .split(/\n| {2,}/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return label.trim() === candidate || lines.includes(candidate);
+}
+
+function optionFor(listbox: Locator, candidate: string): Locator {
+  const quoted = candidate.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+  return listbox
+    .getByRole('option', { name: candidate, exact: true })
+    .or(listbox.locator(`[data-value="${quoted}"]`))
+    .first();
+}
+
+function optionMatches(option: PicklistOption, candidate: string): boolean {
+  return option.value === candidate || labelMatches(option.label, candidate);
+}
+
+/**
+ * locator.click() scrolls the option into view, and Lightning closes the menu on that scroll.
+ * A DOM click on the option does not scroll.
+ */
+async function clickOptionWithoutScroll(option: Locator): Promise<boolean> {
+  try {
+    return await option.evaluate((el) => {
+      const host = el as HTMLElement;
+      const inner = host.shadowRoot?.querySelector<HTMLElement>('[role="option"], .slds-media');
+      (inner ?? host).click();
+      return true;
+    });
+  } catch {
+    return false;
+  }
+}
+
+async function menuOpen(trigger: Locator): Promise<boolean> {
+  return (await trigger.getAttribute('aria-expanded', { timeout: 1_000 }).catch(() => null)) === 'true';
+}
+
+/** aria-expanded flips after the click. getAttribute alone reads the value too early. */
+async function waitForMenu(trigger: Locator): Promise<boolean> {
+  return expect(trigger).toHaveAttribute('aria-expanded', 'true', { timeout: 3_000 }).then(
+    () => true,
+    () => false,
+  );
+}
+
+async function collapseMenu(trigger: Locator): Promise<void> {
+  if (await menuOpen(trigger)) await trigger.press('Escape').catch(() => undefined);
+}
+
+/** Typeahead plus Enter. The trigger is already in view, so the page does not scroll. */
+async function chooseByTypeahead(trigger: Locator, candidate: string): Promise<void> {
+  if (!(await menuOpen(trigger))) return;
+  const isInput = await trigger.evaluate((el) => el instanceof HTMLInputElement).catch(() => false);
+  if (isInput) await trigger.press('ControlOrMeta+A').catch(() => undefined);
+  await trigger.pressSequentially(candidate, { delay: 40 });
+  if (await menuOpen(trigger)) await trigger.press('Enter');
+}
+
+async function selectionStuck(trigger: Locator, accepted: string[], timeout = 3_000): Promise<boolean> {
+  const wanted = [...new Set(accepted.map((item) => item.trim()).filter(Boolean))];
+  return expect
+    .poll(
+      async () => {
+        const isInput = await trigger.evaluate((el) => el instanceof HTMLInputElement).catch(() => false);
+        const current = isInput ? await trigger.inputValue().catch(() => '') : await trigger.innerText().catch(() => '');
+        const text = current.replace(/\s+/g, ' ').trim();
+        // Short codes such as US must match exactly. A visible name may be part of a longer trigger label.
+        return wanted.some((item) => text === item || (item.length > 3 && text.includes(item)));
+      },
+      { timeout },
+    )
+    .toBe(true)
+    .then(
+      () => true,
+      () => false,
+    );
+}
+
 /**
  * Opens a picklist, chooses the first available value, and checks that the trigger kept it.
  * A button combobox shows the value as text. An input combobox (State, Country) keeps it in the value.
+ * A missing menu or a missing name is retried. The duplicate prompt hides the form between attempts.
  */
 export async function selectOption(scope: Scope, label: string, value: string, fallbacks: string[] = []): Promise<string> {
   const page = rootPage(scope);
   const trigger = combobox(scope, label);
   const maxAttempts = 3;
+  const wanted = [...new Set([value, ...fallbacks])];
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     // A duplicate prompt can open while the previous field blurs and swallow the click.
     await dismissErrorDialog(page);
     try {
+      // Scroll the trigger, never the option. The menu is still closed, so this scroll is safe.
+      await trigger.scrollIntoViewIfNeeded({ timeout: 5_000 });
       await trigger.click({ timeout: 5_000 });
     } catch (err) {
       if (attempt === maxAttempts || !(await dismissErrorDialog(page))) throw err;
       continue;
     }
-    const opened = await expect(trigger).toHaveAttribute('aria-expanded', 'true', { timeout: 3_000 }).then(
-      () => true,
-      () => false,
-    );
-    const listbox = opened ? await listboxFor(trigger) : undefined;
-    const optionVisible =
-      listbox !== undefined &&
-      (await listbox
-        .getByRole('option')
-        .first()
-        .waitFor({ state: 'visible', timeout: 2_500 })
-        .then(
-          () => true,
-          () => false,
-        ));
-    if (!listbox || !optionVisible) {
-      if ((await trigger.getAttribute('aria-expanded')) === 'true') {
-        await trigger.click({ timeout: 2_000 }).catch(() => undefined);
-      }
+
+    if (!(await waitForMenu(trigger))) {
+      // Similar Records Exist sets aria-hidden on the form. The combobox locator
+      // cannot resolve until that prompt is closed, so dismiss it and retry.
+      await dismissErrorDialog(page);
       if (attempt === maxAttempts) throw new Error(`Picklist "${label}" did not show its options`);
       continue;
     }
 
+    const listbox = await listboxFor(trigger);
+    const optionVisible = await listbox
+      .getByRole('option')
+      .first()
+      .waitFor({ state: 'visible', timeout: 2_500 })
+      .then(
+        () => true,
+        () => false,
+      );
+    if (!optionVisible) {
+      await dismissErrorDialog(page);
+      await collapseMenu(trigger);
+      if (attempt === maxAttempts) throw new Error(`Picklist "${label}" did not show its options`);
+      continue;
+    }
+
+    const options = await readOptions(listbox);
     let chosen: string | undefined;
-    for (const candidate of [value, ...fallbacks]) {
-      const option = listbox.getByRole('option', { name: candidate, exact: true });
-      if (await option.count()) {
-        await option.first().click();
+    for (const candidate of wanted) {
+      if (options.some((option) => optionMatches(option, candidate)) || (await optionFor(listbox, candidate).count()) > 0) {
         chosen = candidate;
         break;
       }
     }
     if (!chosen) {
-      const available = (await listbox.getByRole('option').allInnerTexts()).map((t) => t.trim());
-      await page.keyboard.press('Escape');
-      throw new Error(`Picklist "${label}" has none of [${[value, ...fallbacks].join(', ')}]; available: [${available.join(', ')}]`);
+      await collapseMenu(trigger);
+      await dismissErrorDialog(page);
+      if (attempt === maxAttempts) {
+        throw new Error(
+          `Picklist "${label}" has none of [${wanted.join(', ')}]; available: [${describeOptions(options)}]`,
+        );
+      }
+      continue;
     }
 
-    const isInput = await trigger.evaluate((el) => el instanceof HTMLInputElement);
-    const committed = await (isInput
-      ? expect(trigger).toHaveValue(chosen, { timeout: 3_000 })
-      : expect(trigger).toContainText(chosen, { timeout: 3_000 })
-    ).then(() => true, () => false);
-    if (committed) return chosen;
+    const option = optionFor(listbox, chosen);
+    const match = options.find((item) => optionMatches(item, chosen));
+    const accepted = [chosen, match?.label ?? '', match?.value ?? ''];
+    if ((await option.count()) > 0) await clickOptionWithoutScroll(option);
+    if (await selectionStuck(trigger, accepted, 2_000)) return chosen;
+
+    if (await menuOpen(trigger)) await chooseByTypeahead(trigger, chosen);
+    if (await selectionStuck(trigger, accepted)) return chosen;
+
+    await collapseMenu(trigger);
     if (attempt === maxAttempts) {
       throw new Error(`Picklist "${label}": "${chosen}" did not stick after ${maxAttempts} attempts`);
     }
@@ -180,6 +354,8 @@ export async function checkRadio(radio: Locator): Promise<void> {
  * State and Country are plain inputs until the org enables the territory picklists, and comboboxes after that.
  */
 export async function fillTextOrSelect(scope: Scope, label: string, value: string): Promise<void> {
+  // The duplicate prompt hides the form. A hidden combobox looks like a missing one.
+  await dismissErrorDialog(rootPage(scope));
   if (await combobox(scope, label).count()) {
     await selectOption(scope, label, value);
   } else {
