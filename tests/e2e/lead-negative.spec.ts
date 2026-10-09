@@ -55,7 +55,7 @@ test.describe('Lead negative cases', () => {
       trackRecord('Lead', id);
     });
 
-    await test.step('Save a second Lead with the same name, company, and email', async () => {
+    await test.step('Save a second Lead with the same email', async () => {
       await leadsPage.open();
       const form = await leadsPage.openNewLeadForm();
       await form.fillMinimal({

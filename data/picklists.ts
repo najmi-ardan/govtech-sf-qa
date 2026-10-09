@@ -1,6 +1,7 @@
 /**
  * Ordered picklist preferences. The form selects the first value the org offers.
- * Lead Status on a new Developer Edition is often "Open - Not Contacted", not "Unqualified".
+ * The assessment example is Unqualified → Qualified. A Developer Edition org uses
+ * Open - Not Contacted → Working - Contacted, so those values follow.
  */
 import { config } from '../config/env';
 
@@ -13,8 +14,8 @@ export const INDUSTRIES = ['Technology', 'Banking', 'Consulting', 'Education', '
 export const RATINGS = ['Hot', 'Warm', 'Cold'];
 
 export const LEAD_STATUS = {
-  initial: ['Open - Not Contacted', 'New'],
-  updated: ['Working - Contacted', 'Working'],
+  initial: ['Unqualified', 'Open - Not Contacted', 'New'],
+  updated: ['Qualified', 'Working - Contacted', 'Working'],
 };
 
 /** Stage name configured for an Opportunity created by conversion. */

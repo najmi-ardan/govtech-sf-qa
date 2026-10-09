@@ -62,6 +62,7 @@ test.describe('Lead creation and status', () => {
       const chosen = await form.setStatus(target, LEAD_STATUS.updated.filter((s) => s !== target && s !== lead.status));
       await form.save();
       log.info('status changed', { from: lead.status, to: chosen });
+      test.info().annotations.push({ type: 'status', description: `${lead.status} → ${chosen}` });
       return chosen;
     });
 
