@@ -248,86 +248,103 @@ async function selectionStuck(trigger: Locator, accepted: string[], timeout = 3_
     );
 }
 
+type PickFailure =
+  | { kind: 'no-options' }
+  | { kind: 'no-match'; available: string }
+  | { kind: 'unstuck'; chosen: string };
+
+function failureMessage(label: string, wanted: string[], failure: PickFailure, attempts: number): string {
+  if (failure.kind === 'no-options') return `Picklist "${label}" did not show its options`;
+  if (failure.kind === 'no-match') {
+    return `Picklist "${label}" has none of [${wanted.join(', ')}]; available: [${failure.available}]`;
+  }
+  return `Picklist "${label}": "${failure.chosen}" did not stick after ${attempts} attempts`;
+}
+
+/**
+ * One attempt. Click scrolls the closed trigger. The option is clicked in the DOM
+ * because scrolling it closes the Lightning menu. Typeahead runs once when the click does not stick.
+ * Returns the label that stuck, or why this attempt failed.
+ */
+async function chooseOnce(page: Page, trigger: Locator, wanted: string[]): Promise<string | PickFailure> {
+  // A click scrolls the closed trigger and waits until it stops moving.
+  await trigger.click();
+
+  if (!(await waitForMenu(trigger))) {
+    // Similar Records Exist sets aria-hidden on the form. The combobox locator
+    // cannot resolve until that prompt is closed, so dismiss it and let the caller retry.
+    await dismissErrorDialog(page);
+    return { kind: 'no-options' };
+  }
+
+  const listbox = await listboxFor(trigger);
+  const optionVisible = await listbox
+    .getByRole('option')
+    .first()
+    .waitFor({ state: 'visible', timeout: 2_500 })
+    .then(
+      () => true,
+      () => false,
+    );
+  if (!optionVisible) {
+    await dismissErrorDialog(page);
+    return { kind: 'no-options' };
+  }
+
+  const options = await readOptions(listbox);
+  let chosen: string | undefined;
+  for (const candidate of wanted) {
+    if (options.some((option) => optionMatches(option, candidate)) || (await optionFor(listbox, candidate).count()) > 0) {
+      chosen = candidate;
+      break;
+    }
+  }
+  if (!chosen) {
+    await dismissErrorDialog(page);
+    return { kind: 'no-match', available: describeOptions(options) };
+  }
+
+  const option = optionFor(listbox, chosen);
+  const match = options.find((item) => optionMatches(item, chosen));
+  const accepted = [chosen, match?.label ?? '', match?.value ?? ''];
+  if ((await option.count()) > 0) await clickOptionWithoutScroll(option);
+  if (await selectionStuck(trigger, accepted, 2_000)) return chosen;
+
+  if (await menuOpen(trigger)) await chooseByTypeahead(trigger, chosen);
+  if (await selectionStuck(trigger, accepted)) return chosen;
+  return { kind: 'unstuck', chosen };
+}
+
 /**
  * Opens a picklist, chooses the first available value, and checks that the trigger kept it.
  * A button combobox shows the value as text. An input combobox (State, Country) keeps it in the value.
- * A missing menu or a missing name is retried. The duplicate prompt hides the form between attempts.
+ * A timeout, a closed menu, or a value that did not stick is tried again.
+ * The duplicate prompt is closed at the start of each attempt.
  */
 export async function selectOption(scope: Scope, label: string, value: string, fallbacks: string[] = []): Promise<string> {
   const page = rootPage(scope);
   const trigger = combobox(scope, label);
   const maxAttempts = 3;
   const wanted = [...new Set([value, ...fallbacks])];
+  let failure: PickFailure | undefined;
+  let thrown: unknown;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    // A duplicate prompt can open while the previous field blurs and swallow the click.
     await dismissErrorDialog(page);
+    failure = undefined;
+    thrown = undefined;
     try {
-      // Scroll the trigger, never the option. The menu is still closed, so this scroll is safe.
-      await trigger.scrollIntoViewIfNeeded({ timeout: 5_000 });
-      await trigger.click({ timeout: 5_000 });
+      const chosen = await chooseOnce(page, trigger, wanted);
+      if (typeof chosen === 'string') return chosen;
+      failure = chosen;
     } catch (err) {
-      if (attempt === maxAttempts || !(await dismissErrorDialog(page))) throw err;
-      continue;
+      thrown = err;
     }
-
-    if (!(await waitForMenu(trigger))) {
-      // Similar Records Exist sets aria-hidden on the form. The combobox locator
-      // cannot resolve until that prompt is closed, so dismiss it and retry.
-      await dismissErrorDialog(page);
-      if (attempt === maxAttempts) throw new Error(`Picklist "${label}" did not show its options`);
-      continue;
-    }
-
-    const listbox = await listboxFor(trigger);
-    const optionVisible = await listbox
-      .getByRole('option')
-      .first()
-      .waitFor({ state: 'visible', timeout: 2_500 })
-      .then(
-        () => true,
-        () => false,
-      );
-    if (!optionVisible) {
-      await dismissErrorDialog(page);
-      await collapseMenu(trigger);
-      if (attempt === maxAttempts) throw new Error(`Picklist "${label}" did not show its options`);
-      continue;
-    }
-
-    const options = await readOptions(listbox);
-    let chosen: string | undefined;
-    for (const candidate of wanted) {
-      if (options.some((option) => optionMatches(option, candidate)) || (await optionFor(listbox, candidate).count()) > 0) {
-        chosen = candidate;
-        break;
-      }
-    }
-    if (!chosen) {
-      await collapseMenu(trigger);
-      await dismissErrorDialog(page);
-      if (attempt === maxAttempts) {
-        throw new Error(
-          `Picklist "${label}" has none of [${wanted.join(', ')}]; available: [${describeOptions(options)}]`,
-        );
-      }
-      continue;
-    }
-
-    const option = optionFor(listbox, chosen);
-    const match = options.find((item) => optionMatches(item, chosen));
-    const accepted = [chosen, match?.label ?? '', match?.value ?? ''];
-    if ((await option.count()) > 0) await clickOptionWithoutScroll(option);
-    if (await selectionStuck(trigger, accepted, 2_000)) return chosen;
-
-    if (await menuOpen(trigger)) await chooseByTypeahead(trigger, chosen);
-    if (await selectionStuck(trigger, accepted)) return chosen;
-
     await collapseMenu(trigger);
-    if (attempt === maxAttempts) {
-      throw new Error(`Picklist "${label}": "${chosen}" did not stick after ${maxAttempts} attempts`);
-    }
   }
+
+  if (failure) throw new Error(failureMessage(label, wanted, failure, maxAttempts));
+  if (thrown instanceof Error) throw thrown;
   throw new Error(`Picklist "${label}" did not keep a value`);
 }
 
