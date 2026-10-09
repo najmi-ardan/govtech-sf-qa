@@ -64,6 +64,16 @@ Lead conversion posts to `/aura`. The action is `serviceComponent://ui.lead.runt
 
 Lightning redraws controls with new ids, and several controls sit in open shadow roots, so a CSS path through the shadow tree breaks on the next render. Fields are located by accessible name. Record fields use the stable `field-label` on `records-record-layout-item`. Lookups stay inside the visible modal or the active record page, because Lightning keeps hidden copies of earlier tabs in the DOM.
 
+Lead Source on the New Lead form is one of those controls. The trigger is a `button` whose id on this render is `combobox-button-193`, nested under `lightning-combobox` and `lightning-base-combobox`. Its accessible name is Lead Source and its role is combobox.
+
+![Lead Source button in the Elements panel](docs/lead-source-elements.png)
+
+From the page, `document.getElementById('combobox-button-193')` and `document.querySelector('#combobox-button-193')` return null. `document.querySelectorAll('button[role="combobox"]')` and `document.querySelectorAll('lightning-combobox')` both return 0. The node sits in an open shadow root, so a document-level CSS selector never sees it, and the id is generated again on the next render.
+
+![document.querySelector cannot see the Lead Source button](docs/lead-source-queryselector.png)
+
+`combobox()` in `pages/components/lightning.ts` uses `getByRole('combobox', { name: 'Lead Source' })`. The name comes from `aria-label="Lead Source"`, which stays the same when Lightning redraws the id. Playwright role locators follow the accessibility tree through open shadow roots. A CSS locator on `combobox-button-193` would match this render and miss the next one.
+
 ## Email verification
 
 Salesforce asks for an email code when a password login comes from a browser it does not recognize. Setup loads the saved session. When Salesforce rejects that file, setup signs a short-lived JWT for an External Client App, exchanges it at the token endpoint, and requests a one-time Lightning URL from `/services/oauth2/singleaccess`. Playwright opens that URL and writes a new `storageState` file. The next run checks the file again and can refresh it, so a deleted or expired cache is replaced without a manual login.
