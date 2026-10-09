@@ -36,6 +36,9 @@ jobs:
       SF_STORAGE_STATE_B64: ${{ secrets.SF_STORAGE_STATE_B64 }}
       STORAGE_STATE_PATH: storage/storageState.json
       SF_BASE_URL: ${{ secrets.SF_BASE_URL }}
+      SF_USERNAME: ${{ secrets.SF_USERNAME }}
+      SF_CLIENT_ID: ${{ secrets.SF_CLIENT_ID }}
+      SF_JWT_PRIVATE_KEY: ${{ secrets.SF_JWT_PRIVATE_KEY }}
     steps:
       - name: Skip when the session secret is absent
         id: session

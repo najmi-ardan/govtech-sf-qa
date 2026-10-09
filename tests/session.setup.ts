@@ -1,16 +1,16 @@
 import fs from 'node:fs';
 import { test as setup, expect } from '@playwright/test';
-import { validateSession } from '../auth/validateSession';
+import { ensureSession } from '../auth/ensureSession';
 import { lightningReady } from '../pages/components/lightning';
 import { config } from '../config/env';
 
 /**
- * Runs before the browser projects. Opens Lightning once with the cached session file.
- * A missing file, or a login or verification page, fails here and the browser projects are skipped.
+ * Runs before the browser projects. Opens Lightning with the cached session file.
+ * When that file is rejected and JWT settings are present, this saves a new file first.
  */
 setup('cached session shows the App Launcher or global search', async ({ browser }) => {
-  setup.setTimeout(2 * config.timeouts.navigation);
-  const session = await validateSession(browser);
+  setup.setTimeout(config.timeouts.test);
+  const session = await ensureSession(browser);
   try {
     await expect(lightningReady(session.page)).toBeVisible();
     await expect(session.page).not.toHaveURL(/login\.salesforce\.com|\/secur\//);

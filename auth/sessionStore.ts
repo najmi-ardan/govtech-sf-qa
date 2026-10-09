@@ -28,6 +28,14 @@ export class SessionStateError extends Error {
   }
 }
 
+/** Writes the session file without leaving a partial file behind. */
+export function writeStorageState(file: string, state: StorageStateFile): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+  fs.renameSync(tmp, file);
+}
+
 /** Reads the session file and checks that it contains a sid cookie. */
 export function readStorageState(file: string = config.storageStatePath): StorageStateFile {
   if (!fs.existsSync(file)) {

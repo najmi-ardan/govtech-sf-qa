@@ -7,6 +7,7 @@ node_modules/
 storage/
 *storageState*.json
 .auth/
+.certs/
 
 test-results/
 reports/
