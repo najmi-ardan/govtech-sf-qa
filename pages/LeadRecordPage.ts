@@ -16,8 +16,20 @@ export class LeadRecordPage extends RecordPage {
     return this.activePage.getByRole('heading', { level: 1 }).filter({ visible: true }).first();
   }
 
+  /** The docked Data Cloud video covers the overflow menu and takes the click. */
+  private async dismissDockedVideoPrompt(): Promise<void> {
+    const prompt = this.page.getByRole('dialog').filter({
+      has: this.page.locator('iframe[title="Embedded video"], iframe[src*="vidyard"]'),
+    });
+    const close = prompt.getByRole('button', { name: 'Close', exact: true }).first();
+    if (!(await close.isVisible().catch(() => false))) return;
+    await close.click();
+    await expect(prompt).toBeHidden();
+  }
+
   /** Header actions that do not fit move into Show more actions. Exact name avoids Edit matching a longer label. */
   async clickAction(name: string): Promise<void> {
+    await this.dismissDockedVideoPrompt();
     const direct = this.header.getByRole('button', { name, exact: true }).filter({ visible: true });
     if (await direct.count()) {
       await direct.first().click();
