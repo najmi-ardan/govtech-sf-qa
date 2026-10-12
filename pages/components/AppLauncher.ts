@@ -24,19 +24,23 @@ export class AppLauncher {
   }
 
   async openApp(appName: string): Promise<void> {
-    await this.button.click();
-    await expect(this.search).toBeVisible();
     const result = this.result(appName);
-    // The launcher can clear the search box when its default list finishes loading.
+    // The default app list replaces the search box, and the panel can close
+    // before the option is chosen. inputValue() would otherwise wait the full
+    // action timeout, so the retry never reopens the launcher. The Sales
+    // option has to be clicked; a closed panel is not a completed choice.
     await expect(async () => {
-      if ((await this.search.inputValue()) !== appName) await this.search.fill(appName);
+      if ((await this.button.getAttribute('aria-expanded', { timeout: 2_000 })) !== 'true') {
+        await this.button.click({ timeout: 5_000 });
+      }
+      await expect(this.search).toBeVisible({ timeout: 5_000 });
+      if ((await this.search.inputValue({ timeout: 2_000 })) !== appName) {
+        await this.search.fill(appName, { timeout: 5_000 });
+      }
       await expect(this.search).toHaveValue(appName, { timeout: 2_000 });
       await expect(result).toBeVisible({ timeout: 5_000 });
-    }).toPass({ timeout: 30_000 });
-    // A click on the option is dropped while the results re-render. Click again while it is still shown.
-    await expect(async () => {
-      if (await result.isVisible()) await result.click({ timeout: 5_000 });
+      await result.click({ timeout: 5_000 });
       await expect(this.search).toBeHidden({ timeout: 5_000 });
-    }).toPass({ timeout: 30_000 });
+    }).toPass({ timeout: 45_000 });
   }
 }

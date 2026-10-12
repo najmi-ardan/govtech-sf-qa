@@ -19,6 +19,11 @@ export class LeadsPage extends BasePage {
   }
 
   async openNewLeadForm(): Promise<LeadFormModal> {
+    // /Lead/home lands on Pipeline Inspection while New is already painted.
+    // The view then adds filterName and replaces the page, which drops a click
+    // made during that handoff. The list URL used by open() already has filterName.
+    await expect(this.page).toHaveURL(/\/lightning\/o\/Lead\/.*[?&]filterName=/);
+    await this.waitForLightning();
     await this.newButton.click();
     const form = new LeadFormModal(this.page, this.log, /^New Lead$/);
     await form.expectOpen();

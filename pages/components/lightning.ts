@@ -106,10 +106,17 @@ export async function dismissErrorDialog(page: Page, timeout = 10_000): Promise<
 }
 
 export async function fillText(scope: Scope, label: string, value: string): Promise<void> {
-  await dismissErrorDialog(rootPage(scope));
+  const page = rootPage(scope);
   const field = textField(scope, label);
-  await field.fill(value);
-  await expect(field).toHaveValue(value);
+  // Similar Records Exist opens on the blur of the previous field and sets
+  // aria-hidden on the form. Role locators then report the textbox as missing.
+  // Close that prompt and require the typed value. A value the field did not
+  // keep still fails this assertion.
+  await expect(async () => {
+    await dismissErrorDialog(page);
+    await field.fill(value, { timeout: 5_000 });
+    await expect(field).toHaveValue(value, { timeout: 2_000 });
+  }).toPass({ timeout: 30_000 });
 }
 
 /** The listbox for an open combobox, found through aria-controls so hidden comboboxes are not used. */
