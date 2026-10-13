@@ -87,3 +87,9 @@ The behaviour under test is done in the UI. REST seeds an existing Account or Co
 ## CI
 
 The verify job in `.github/workflows/ci.yml` runs the typecheck, lint, and `npx playwright test --list`. It uses no secrets. The live job restores the session file from `SF_STORAGE_STATE_B64` and skips when that secret is absent.
+
+## Walkthrough
+
+Screen-recorded walkthrough of a live run of the suite (about five minutes). It covers the dynamic Lightning component, the test data strategy, and a challenge from development.
+
+https://drive.google.com/file/d/13s7rQIBZHXypyW4-8ID2QEi4TquMDTzY/view
